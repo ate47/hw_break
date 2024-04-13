@@ -36,22 +36,24 @@ namespace HwBp
         {
             return {
                 0,
-                result
+                result,
+                INVALID_HANDLE_VALUE
             };
         }
 
         const std::uint8_t m_registerIndex;
         const Result m_error;
+        const HANDLE m_thread;
     };
 
     namespace Detail
     {
         template <typename TAction, typename TFailure>
-        auto UpdateThreadContext(TAction action, TFailure failure)
+        auto UpdateThreadContext(TAction action, TFailure failure, HANDLE hThread)
         {
             CONTEXT ctx{0};
             ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
-            if (::GetThreadContext(::GetCurrentThread(), &ctx) == FALSE)
+            if (::GetThreadContext(hThread, &ctx) == FALSE)
             {
                 return failure(Result::CantGetThreadContext);
             }
@@ -70,7 +72,7 @@ namespace HwBp
 
             const auto actionResult = action(ctx, busyDebugRegister);
 
-            if (::SetThreadContext(::GetCurrentThread(), &ctx) == FALSE)
+            if (::SetThreadContext(hThread, &ctx) == FALSE)
             {
                 return failure(Result::CantSetThreadContext);
             }
@@ -79,7 +81,7 @@ namespace HwBp
         }
     }
 
-    Breakpoint Set(const void* onPointer, std::uint8_t size, When when)
+    Breakpoint Set(const void* onPointer, std::uint8_t size, When when, HANDLE hThread = ::GetCurrentThread())
     {
         return Detail::UpdateThreadContext(
             [&](CONTEXT& ctx, const std::array<bool, 4> & busyDebugRegister) -> Breakpoint
@@ -165,12 +167,13 @@ namespace HwBp
 
                 std::memcpy(&ctx.Dr7, &dr7, sizeof(ctx.Dr7));
 
-                return Breakpoint{ static_cast<std::uint8_t>(registerIndex), Result::Success };
+                return Breakpoint{ static_cast<std::uint8_t>(registerIndex), Result::Success, hThread };
             },
             [](auto failureCode)
             {
                 return Breakpoint::MakeFailed(failureCode);
-            }
+            },
+            hThread
         );
     }
 
@@ -196,7 +199,8 @@ namespace HwBp
             [](auto failureCode)
             {
                 return Breakpoint::MakeFailed(failureCode);
-            }
+            },
+            bp.m_thread
         );
     }
 }
